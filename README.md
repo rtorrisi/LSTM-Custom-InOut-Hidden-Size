@@ -1,61 +1,48 @@
+Since *PyTorch* ```torch.nn.LSTM``` and ```torch.nn.LSTMCell``` implementations only permit to specify a unique **hidden_size** for both input and output hidden state, I realized a custom LSTM model which *allow to give as model input an hidden_state which dimension can differ from the hidden_state that the model produce in output*.
+
+This implementation could be usefull for specific case such as in **[Matching Networks for One Shot Learning](https://arxiv.org/pdf/1606.04080.pdf)**, where the concatenation of LSTM hidden output and another vector is required as input of the next LSTM step.
+
+The only limitation of this implementation is that, if input and output hidden state differ, the sample _x_ must have a sequence_len of 1. If sequence is needed, it have to be managed externally. Alternatively, the user have to specify the way the hidden output of the first sequence element will be readjusted in order to process the next sequence element within the for-loop of the CustomLSTM class.
+
+Here is an example of our CustomLSTM using a different hidden_size for input and output.
+
 ```python
-import torch
+in_batch_size = 5
+in_sequence_len = 1 # read the description above
+in_feature_size = 2
+
+in_hidden_size = 6
+out_hidden_size = 3
+
+custom_lstm = CustomLSTM(input_size=in_feature_size, input_hidden_size=in_hidden_size, output_hidden_size=out_hidden_size)
 ```
 
 
 ```python
-class CustomLSTM(torch.nn.Module):
-    def __init__(self, input_size, input_hidden_size, output_hidden_size):
-        super(CustomLSTM, self).__init__()
-        self.input_size = input_size
-        self.input_hidden_size = input_hidden_size
-        self.output_hidden_size = output_hidden_size
-        
-        self.input_linear = torch.nn.Linear(input_size, output_hidden_size*4, bias=True)
-        self.hidden_linear = torch.nn.Linear(input_hidden_size, output_hidden_size*4, bias=True)
-        
-    def forward(self, x, h_in=None, c_in=None):
-        '''
-        x of shape [batch, sequence, feature]
-        h_in of shape [input_hidden_size]
-        c_in shape [output_hidden_size]
-        '''
-        batch_size, seq_size, feature_size = x.size()
-        hidden_seq = []
-        
-        if h_in is None:
-            h_in = torch.zeros(self.input_hidden_size)
-        if c_in is None:
-            c_in = torch.zeros(self.output_hidden_size)
-        
-        o_h_s = self.output_hidden_size
-        
-        for seq in range(seq_size):
-            seq_x = x[:, seq, :]
-            
-            input_linear_out = self.input_linear(seq_x)
-            hidden_linear_out = self.hidden_linear(h_in)
-            
-            gates = input_linear_out + hidden_linear_out
-            
-            input_gate = torch.sigmoid(gates[:, :o_h_s])
-            forget_gate = torch.sigmoid(gates[:, o_h_s:o_h_s*2]) 
-            candidate_gate = torch.tanh(gates[:, o_h_s*2:o_h_s*3])
-            output_gate = torch.sigmoid(gates[:, o_h_s*3:])
+# generate a random input of shape [batch, sequence, feature]
+random_input = torch.FloatTensor(in_batch_size, in_sequence_len, in_feature_size).normal_()
 
-            c_in = c_out = (forget_gate * c_in) + (input_gate * candidate_gate)
-            h_in = h_out = (output_gate * torch.tanh(c_out))
-            hidden_seq.append(h_out.unsqueeze(0))
-           
-        hidden_seq = torch.cat(hidden_seq, dim=0)
-        # reshape from [sequence, batch, feature] to [batch, sequence, feature]
-        hidden_seq = hidden_seq.transpose(0, 1).contiguous()
-        
-        return hidden_seq, (h_out, c_out)
+custom_output, (h_out, c_out) = custom_lstm(random_input, h_in=torch.zeros(in_hidden_size), c_in=torch.zeros(out_hidden_size))
+custom_output, (h_out, c_out) = custom_lstm(random_input, h_in=torch.cat((h_out, h_out), 1), c_in=c_out)
 ```
 
-Firstly, we have to verify that original LSTM and our custom LSTM produce the same result when hidden_state has the same input and output size 
 
+```python
+print(custom_output)
+```
+
+    tensor([[[ 0.1137, -0.0591, -0.0782]],
+    
+            [[ 0.3027, -0.0427, -0.0110]],
+    
+            [[ 0.1662, -0.1025, -0.0611]],
+    
+            [[ 0.2475, -0.0816, -0.0311]],
+    
+            [[ 0.1992, -0.0799, -0.0468]]], grad_fn=<TransposeBackward0>)
+
+
+We can also verify that original LSTM and our custom LSTM produce the same result when hidden_state has the same input and output size 
 
 ```python
 in_batch_size = 2
@@ -131,44 +118,4 @@ print(original_output, custom_output, sep="\n\n-------------\n\n")
     
             [[-0.0480, -0.0100, -0.0224,  0.0130],
              [-0.0601, -0.0248, -0.1676,  0.0772],
-             [-0.0429, -0.0316, -0.2057,  0.0988]]], grad_fn=<CopyBackwards>)
-    
-
-Now try our custom LSTM using a a different size for in_hidden_size and out_hidden_size. Sequence length have to be of size 1
-
-
-```python
-in_batch_size = 5
-in_sequence_len = 1
-in_feature_size = 2
-
-in_hidden_size = 6
-out_hidden_size = 3
-
-custom_lstm = CustomLSTM(input_size=in_feature_size, input_hidden_size=in_hidden_size, output_hidden_size=out_hidden_size)
-```
-
-
-```python
-# generate a random input of shape [batch, sequence, feature]
-rin = torch.FloatTensor(in_batch_size, in_sequence_len, in_feature_size).normal_()
-
-custom_output, (h_out, c_out) = custom_lstm(rin, h_in=torch.zeros(in_hidden_size), c_in=torch.zeros(out_hidden_size))
-custom_output, (h_out, c_out) = custom_lstm(rin, h_in=torch.cat((h_out, h_out), 1), c_in=c_out)
-```
-
-
-```python
-print(custom_output)
-```
-
-    tensor([[[ 0.1137, -0.0591, -0.0782]],
-    
-            [[ 0.3027, -0.0427, -0.0110]],
-    
-            [[ 0.1662, -0.1025, -0.0611]],
-    
-            [[ 0.2475, -0.0816, -0.0311]],
-    
-            [[ 0.1992, -0.0799, -0.0468]]], grad_fn=<TransposeBackward0>)
-    
+             [-0.0429, -0.0316, -0.2057,  0.0988]]], grad_fn=<CopyBackwards>)    
