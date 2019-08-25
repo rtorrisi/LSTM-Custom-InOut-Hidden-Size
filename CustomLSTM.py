@@ -1,4 +1,4 @@
-import pytorch
+import torch
 
 class CustomLSTM(torch.nn.Module):
     def __init__(self, input_size, input_hidden_size, output_hidden_size):
